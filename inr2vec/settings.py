@@ -21,9 +21,9 @@ except ImportError:
 """
 
 # DATASET
-TRAIN_DSET_JSON = os.path.abspath(os.path.join('data', 'train.json'))
-VAL_DSET_JSON = os.path.abspath(os.path.join('data', 'validation.json'))  
-TEST_DSET_JSON = os.path.abspath(os.path.join('data', 'test.json'))  
+TRAIN_DSET_JSON = os.path.abspath(os.path.join('nerf_data', 'train.json'))
+VAL_DSET_JSON = os.path.abspath(os.path.join('nerf_data', 'validation.json'))  
+TEST_DSET_JSON = os.path.abspath(os.path.join('nerf_data', 'test.json'))  
 
 # NERF2VEC
 NERF2VEC_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'ckpts')
