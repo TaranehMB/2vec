@@ -23,7 +23,7 @@ from torch import Tensor
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 
-from models.encoder import Encoder
+from models.inr_encoder import Encoder
 from models.idecoder import ImplicitDecoder
 from utils import get_mlp_params_as_matrix
 
