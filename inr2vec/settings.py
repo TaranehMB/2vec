@@ -31,12 +31,12 @@ NERF2VEC_ALL_CKPTS_PATH = os.path.join('nerf2vec', 'train', 'all_ckpts')
 NERF2VEC_EMBEDDINGS_DIR = os.path.join('nerf2vec', 'embeddings') 
 
 # CLASSIFICATION
-CLASSIFICATION_OUTPUT_DIR = os.path.join('task_classification', 'train')
+CLASSIFICATION_OUTPUT_DIR = os.path.join('nerf_classification', 'train')
 
 # GENERATION
-GENERATION_EMBEDDING_DIR = os.path.join('task_generation', 'latent_embeddings')
-GENERATION_OUT_DIR = os.path.join('task_generation', 'experiments', '{}')  # The placeholder will contain the class index
-GENERATION_NERF2VEC_FULL_CKPT_PATH = os.path.join('task_classification', 'train', 'ckpts', '499.pt')
-GENERATION_LATENT_GAN_FULL_CKPT_PATH = os.path.join('task_generation', 'experiments', 'nerf2vec_{}', 'generated_embeddings', 'epoch_2000.npz')  # The placeholder will contain the class index
+GENERATION_EMBEDDING_DIR = os.path.join('nerf_generation', 'latent_embeddings')
+GENERATION_OUT_DIR = os.path.join('nerf_generation', 'experiments', '{}')  # The placeholder will contain the class index
+GENERATION_NERF2VEC_FULL_CKPT_PATH = os.path.join('nerf_classification', 'train', 'ckpts', '499.pt')
+GENERATION_LATENT_GAN_FULL_CKPT_PATH = os.path.join('nerf_generation', 'experiments', 'nerf2vec_{}', 'generated_embeddings', 'epoch_2000.npz')  # The placeholder will contain the class index
     
 
