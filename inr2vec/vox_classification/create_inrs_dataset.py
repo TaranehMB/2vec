@@ -61,6 +61,7 @@ class InrsDatasetCreator:
 
     def get_dataset(self, split: str, transforms: List[Callable] = []) -> Dataset:
         if self.dset_name == "shapenet10":
+            breakpoint()
             dset = PlyDataset(self.pcd_root, split, transforms)
         else:
             raise ValueError("Unknown dataset.")

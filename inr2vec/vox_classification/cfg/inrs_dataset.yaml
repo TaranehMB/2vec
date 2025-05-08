@@ -1,5 +1,6 @@
 dset_name: "@OPTIONS(shapenet10)"
-pcd_root: "/path/to/pcd/dset"
+#pcd_root: "/path/to/pcd/dset"
+pcd_root: "/media/data6TB_new/nf2vec_data/shapenet_vox_h512l4_aug"
 splits: ["train", "val", "test"]
 
 num_points_pcd: 2048
@@ -18,4 +19,5 @@ mlp:
 num_steps: 500
 lr: 1e-4
 
-out_root: "/path/where/to/save/inrs"
+#out_root: "/path/where/to/save/inrs"
+out_root: "/media/data6TB_new/output/vox_classification"
