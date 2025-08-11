@@ -270,7 +270,7 @@ run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
 )
 def main() -> None:
     wandb.init(
-        entity="entity",
+        #entity="entity",
         project=f"inr2vec",
         name=get_run_name(),
         dir=get_out_dir(),

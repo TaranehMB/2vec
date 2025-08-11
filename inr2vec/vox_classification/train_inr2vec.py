@@ -252,7 +252,11 @@ class Inr2vecTrainer:
             centr = rearrange(centr, "b r1 r2 r3 d -> b (r1 r2 r3) d")
             emb = embeddings[i].unsqueeze(0)
             vgrid_pred = torch.sigmoid(self.decoder(emb, centr).squeeze(0))
-            pcd_pred = centr[0][vgrid_pred > 0.4]
+            adaptive_threshold = torch.quantile(vgrid_pred, 0.9)  # Top 10% of predictions
+            threshold = min(adaptive_threshold, 0.5)  # Ensure threshold is not too high
+            print(f"🔥 Threshold for {split} sample {i}: {threshold.item()}")
+            pcd_pred = centr[0][vgrid_pred > threshold]
+            #pcd_pred = centr[0][vgrid_pred > 0.4]
             pcd_pred = random_point_sampling(pcd_pred, 2048)
 
             gt_wo3d = wandb.Object3D(pcd_gt.cpu().detach().numpy())
@@ -315,7 +319,7 @@ run_cfg_file = sys.argv[1] if len(sys.argv) == 2 else None
 )
 def main() -> None:
     wandb.init(
-        entity="entity",
+        #entity="entity",
         project="inr2vec",
         name=get_run_name(),
         dir=str(get_out_dir()),
