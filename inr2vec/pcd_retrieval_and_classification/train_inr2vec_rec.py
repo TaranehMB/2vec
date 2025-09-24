@@ -44,12 +44,11 @@ class InrDataset(Dataset):
 
     def __getitem__(self, index: int) -> Tuple[Tensor, Tensor]:
         with h5py.File(self.mlps_paths[index], "r") as f:
-            pcd = torch.from_numpy(np.array(f.get("pcd"))) #we are getting the point cloud here
-            params = np.array(f.get("params")) #we are getting the parameters of the MLP here
-            params = torch.from_numpy(params).float() #converting to float tensor
-            matrix = get_mlp_params_as_matrix(params, self.sample_sd) #converting to matrix form
+            params = np.array(f.get("params"))  # get parameters
+            params = torch.from_numpy(params).float()
+            matrix = get_mlp_params_as_matrix(params, self.sample_sd)
 
-        return pcd, matrix
+        return params, matrix
 
 
 class Inr2vecTrainer:
@@ -60,10 +59,22 @@ class Inr2vecTrainer:
         self.stds = hcfg("stds", List[float])
         self.num_points_per_std = hcfg("num_points_per_std", List[int])
 
+        # Create sample MLP for reconstruction
         mlp_hdim = hcfg("mlp.hidden_dim", int)
         num_hidden_layers = hcfg("mlp.num_hidden_layers", int)
-        mlp = SIREN(3, mlp_hdim, num_hidden_layers, 1)
-        sample_sd = mlp.state_dict()
+        self.sample_mlp = SIREN(3, mlp_hdim, num_hidden_layers, 1)
+        sample_sd = self.sample_mlp.state_dict()
+
+        # Add reconstruction parameters
+        try:
+            self.num_reconstruction_points = hcfg("num_reconstruction_points", int)
+        except:
+            self.num_reconstruction_points = 4096
+        
+        try:
+            self.reconstruction_ref_step = hcfg("reconstruction_ref_step", int)
+        except:
+            self.reconstruction_ref_step = 1
 
         train_split = hcfg("train_split", str)
         train_dset = InrDataset(inrs_root, train_split, sample_sd)
@@ -124,6 +135,42 @@ class Inr2vecTrainer:
         self.ckpts_path.mkdir(exist_ok=True)
         self.all_ckpts_path.mkdir(exist_ok=True)
 
+    def reconstruct_pcd_from_params(self, params: Tensor) -> Tensor:
+        """Reconstruct point cloud from MLP parameters"""
+        # Create temporary MLP and load parameters
+        mlp_hdim = hcfg("mlp.hidden_dim", int)
+        num_hidden_layers = hcfg("mlp.num_hidden_layers", int)
+        mlp = SIREN(3, mlp_hdim, num_hidden_layers, 1)
+        mlp.cuda()  # Move MLP to GPU first
+        
+        # Load parameters into MLP (make sure params are on GPU and require grad)
+        params = params.cuda()
+        param_dict = {}
+        param_idx = 0
+        for name, param in mlp.named_parameters():
+            param_size = param.numel()
+            new_param = params[param_idx:param_idx + param_size].reshape(param.shape)
+            new_param.requires_grad_(True)  # Enable gradients for sampling function
+            param_dict[name] = new_param
+            param_idx += param_size
+        
+        mlp.load_state_dict(param_dict)
+        mlp.eval()
+        
+        def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
+            pred = torch.sigmoid(mlp(coords)[0])
+            pred = 1 - pred
+            pred *= 0.1
+            return pred
+        
+        with torch.enable_grad():  # Ensure gradients are enabled for sampling
+            pred_pcd = sample_pcds_from_udfs(
+                udfs_func, 1, 4096, (-1, 1), 0.05, 0.02, 
+                self.num_reconstruction_points, self.reconstruction_ref_step
+            )[0]
+        
+        return pred_pcd.detach()  # Detach the result to avoid gradient tracking
+
     def logfn(self, values: Dict[str, Any]) -> None:
         wandb.log(values, step=self.global_step, commit=False)
 
@@ -139,9 +186,15 @@ class Inr2vecTrainer:
 
             desc = f"Epoch {epoch}/{num_epochs}"
             for batch in progress_bar(self.train_loader, desc=desc):
-                pcds, matrices = batch
+                params, matrices = batch
                 matrices = matrices.cuda()
-                pcds = pcds.cuda()
+
+                # Reconstruct point clouds from parameters
+                pcds = []
+                for i in range(params.shape[0]):
+                    pcd = self.reconstruct_pcd_from_params(params[i])
+                    pcds.append(pcd)
+                pcds = torch.stack(pcds, dim=0).cuda()
 
                 coords = []
                 labels = []
@@ -195,11 +248,17 @@ class Inr2vecTrainer:
         fscores = []
         idx = 0
         for batch in progress_bar(loader, desc=f"Validating on {split} set"):
-            pcds, matrices = batch
-            pcds = pcds.cuda()
+            params, matrices = batch
             matrices = matrices.cuda()
 
-            bs = pcds.shape[0]
+            # Reconstruct ground truth point clouds from parameters
+            gt_pcds = []
+            for i in range(params.shape[0]):
+                pcd = self.reconstruct_pcd_from_params(params[i])
+                gt_pcds.append(pcd)
+            gt_pcds = torch.stack(gt_pcds, dim=0).cuda()
+
+            bs = matrices.shape[0]
 
             with torch.no_grad():
                 embeddings = self.encoder(matrices)
@@ -220,10 +279,10 @@ class Inr2vecTrainer:
 
             pred_pcds = torch.stack(pred_pcds, dim=0)
 
-            cd = chamfer_t(pred_pcds, pcds)
+            cd = chamfer_t(pred_pcds, gt_pcds)
             cdts.extend([float(cd[i]) for i in range(bs)])
 
-            f = f_score(pred_pcds, pcds, threshold=0.01)[0]
+            f = f_score(pred_pcds, gt_pcds, threshold=0.01)[0]
             fscores.extend([float(f[i]) for i in range(bs)])
 
             if idx > 99:
@@ -249,13 +308,19 @@ class Inr2vecTrainer:
         loader_iter = iter(loader)
         batch = next(loader_iter)
 
-        pcds, matrices = batch
-        pcds = pcds.cuda()
+        params, matrices = batch
         matrices = matrices.cuda()
 
-        bs = pcds.shape[0]
+        # Reconstruct ground truth point clouds from parameters
+        gt_pcds = []
+        for i in range(params.shape[0]):
+            pcd = self.reconstruct_pcd_from_params(params[i])
+            gt_pcds.append(pcd)
+        gt_pcds = torch.stack(gt_pcds, dim=0).cuda()
 
-        with torch.no_grad():
+        bs = matrices.shape[0]
+
+        with torch.no_data():
             embeddings = self.encoder(matrices)
 
         pred_pcds = []
@@ -273,7 +338,7 @@ class Inr2vecTrainer:
             pred_pcds.append(pred_pcd[0])
 
         for i in range(bs):
-            gt_wo3d = wandb.Object3D(pcds[i].cpu().detach().numpy())
+            gt_wo3d = wandb.Object3D(gt_pcds[i].cpu().detach().numpy())
             pred_wo3d = wandb.Object3D(pred_pcds[i].cpu().detach().numpy())
             pcd_logs = {f"{split}/pcd_{i}": [gt_wo3d, pred_wo3d]}
             self.logfn(pcd_logs)

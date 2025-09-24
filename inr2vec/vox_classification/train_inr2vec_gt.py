@@ -1,20 +1,20 @@
 import sys
+import time  # Import the time module
 
 sys.path.append("..")
-
 import logging
 import os
 from pathlib import Path
 from random import randint
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import h5py
 import numpy as np
 import torch
-import torch.nn.functional as F
 import wandb
+from einops import rearrange
 from hesiod import get_cfg_copy, get_out_dir, get_run_name, hcfg, hmain
-from pycarus.geometry.pcd import compute_udf_from_pcd, sample_pcds_from_udfs
+from pycarus.geometry.pcd import random_point_sampling, voxelize_pcd
 from pycarus.learning.models.siren import SIREN
 from pycarus.metrics.chamfer_distance import chamfer_t
 from pycarus.metrics.f_score import f_score
@@ -25,58 +25,76 @@ from torch.utils.data import DataLoader, Dataset
 
 from models.encoder import Encoder
 from models.idecoder import ImplicitDecoder
-from utils import get_mlp_params_as_matrix
+from utils import focal_loss, get_mlp_params_as_matrix
 
 logging.disable(logging.INFO)
 os.environ["WANDB_SILENT"] = "true"
 
 
 class InrDataset(Dataset):
-    def __init__(self, inrs_root: Path, split: str, sample_sd: Dict[str, Any]) -> None:
+    def __init__(
+        self,
+        inrs_root: Path,
+        split: str,
+        sample_sd: Dict[str, Any],
+        vox_res: int,
+    ) -> None:
         super().__init__()
-
+        
+        start_time = time.time() # Start timer for __init__
         self.inrs_root = inrs_root / split
         self.mlps_paths = sorted(self.inrs_root.glob("*.h5"), key=lambda x: int(x.stem))
         self.sample_sd = sample_sd
+        self.vox_res = vox_res
+        end_time = time.time() # End timer for __init__
+        print(f"Dataset __init__ took {end_time - start_time:.4f} seconds to complete.")
 
     def __len__(self) -> int:
         return len(self.mlps_paths)
 
-    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor]:
+    def __getitem__(self, index: int) -> Tuple[Tensor, Tensor, Tensor]:
+        start_time = time.time() # Start timer for __getitem__
         with h5py.File(self.mlps_paths[index], "r") as f:
-            pcd = torch.from_numpy(np.array(f.get("pcd"))) #we are getting the point cloud here
-            params = np.array(f.get("params")) #we are getting the parameters of the MLP here
-            params = torch.from_numpy(params).float() #converting to float tensor
-            matrix = get_mlp_params_as_matrix(params, self.sample_sd) #converting to matrix form
+            read_start = time.time()
+            pcd = torch.from_numpy(np.array(f.get("pcd")))
+            params = np.array(f.get("params"))
+            params = torch.from_numpy(params).float()
+            read_end = time.time()
+            print(f"--- HDF5 read for item {index} took {read_end - read_start:.4f} seconds.")
+            
+            matrix = get_mlp_params_as_matrix(params, self.sample_sd)
 
-        return pcd, matrix
+        voxelize_start = time.time()
+        vgrid, centroids = voxelize_pcd(pcd, self.vox_res, -1, 1)
+        voxelize_end = time.time()
+        print(f"--- Voxelization for item {index} took {voxelize_end - voxelize_start:.4f} seconds.")
+        
+        end_time = time.time() # End timer for __getitem__
+        print(f"__getitem__ for item {index} took a total of {end_time - start_time:.4f} seconds.")
+
+        return vgrid, centroids, matrix
 
 
 class Inr2vecTrainer:
     def __init__(self) -> None:
         inrs_root = Path(hcfg("inrs_root", str))
-
-        self.num_queries_on_surface = hcfg("num_queries_on_surface", int)
-        self.stds = hcfg("stds", List[float])
-        self.num_points_per_std = hcfg("num_points_per_std", List[int])
+        self.num_points_fitting = hcfg("num_points_fitting", int)
 
         mlp_hdim = hcfg("mlp.hidden_dim", int)
         num_hidden_layers = hcfg("mlp.num_hidden_layers", int)
         mlp = SIREN(3, mlp_hdim, num_hidden_layers, 1)
         sample_sd = mlp.state_dict()
 
+        vox_res = hcfg("vox_res", int)
+        
+        dataloader_start = time.time()
         train_split = hcfg("train_split", str)
-        train_dset = InrDataset(inrs_root, train_split, sample_sd)
+        train_dset = InrDataset(inrs_root, train_split, sample_sd, vox_res)
         train_bs = hcfg("train_bs", int)
-        self.train_loader = DataLoader(
-            train_dset,
-            batch_size=train_bs,
-            num_workers=8,
-            shuffle=True,
-        )
-
+        self.train_loader = DataLoader(train_dset, batch_size=train_bs, num_workers=8, shuffle=True)
+        
         val_split = hcfg("val_split", str)
-        val_dset = InrDataset(inrs_root, val_split, sample_sd)
+        val_dset = InrDataset(inrs_root, val_split, sample_sd, vox_res)
         val_bs = hcfg("val_bs", int)
         self.val_loader = DataLoader(val_dset, batch_size=val_bs, num_workers=8)
         self.val_loader_shuffled = DataLoader(
@@ -85,6 +103,8 @@ class Inr2vecTrainer:
             num_workers=8,
             shuffle=True,
         )
+        dataloader_end = time.time()
+        print(f"Dataloader setup (including datasets) took {dataloader_end - dataloader_start:.4f} seconds.")
 
         encoder_cfg = hcfg("encoder", Dict[str, Any])
         encoder = Encoder(
@@ -133,46 +153,49 @@ class Inr2vecTrainer:
 
         for epoch in range(start_epoch, num_epochs):
             self.epoch = epoch
-
+            
+            epoch_start_time = time.time() # Timer for epoch
+            
             self.encoder.train()
             self.decoder.train()
-
+            
+            batch_start_time = time.time()
             desc = f"Epoch {epoch}/{num_epochs}"
             for batch in progress_bar(self.train_loader, desc=desc):
-                pcds, matrices = batch
-                matrices = matrices.cuda()
-                pcds = pcds.cuda()
+                batch_end_time = time.time()
+                print(f"Batch loaded in {batch_end_time - batch_start_time:.4f} seconds.")
 
-                coords = []
-                labels = []
-                for i in range(pcds.shape[0]):
-                    crd, lbl = compute_udf_from_pcd(
-                        pcds[i],
-                        self.num_queries_on_surface,
-                        self.stds,
-                        self.num_points_per_std,
-                        (-1, 1),
-                        convert_to_bce_labels=True,
-                    )
-                    coords.append(crd)
-                    labels.append(lbl)
-                coords = torch.stack(coords, dim=0).cuda()
-                labels = torch.stack(labels, dim=0).cuda()
+                vgrids, centroids, matrices = batch
+                vgrids = vgrids.cuda()
+                centroids = centroids.cuda()
+                matrices = matrices.cuda()
+
+                coords = rearrange(centroids, "b r1 r2 r3 d -> b (r1 r2 r3) d")
+                labels = rearrange(vgrids, "b r1 r2 r3 -> b (r1 r2 r3)")
+
+                coords_and_labels = torch.cat((coords, labels.unsqueeze(-1)), dim=-1)
+                selected_c_and_l = random_point_sampling(coords_and_labels, self.num_points_fitting)
+
+                selected_coords = selected_c_and_l[:, :, :3]
+                selected_labels = selected_c_and_l[:, :, 3]
 
                 embeddings = self.encoder(matrices)
+                pred = self.decoder(embeddings, selected_coords)
 
-                pred = self.decoder(embeddings, coords)
-
-                loss = F.binary_cross_entropy_with_logits(pred, labels)
+                loss = focal_loss(pred, selected_labels)
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
+                
                 if self.global_step % 10 == 0:
                     self.logfn({"train/loss": loss.item()})
 
                 self.global_step += 1
+                batch_start_time = time.time() # Reset timer for next batch
+
+            epoch_end_time = time.time()
+            print(f"Epoch {epoch} training loop took {epoch_end_time - epoch_start_time:.4f} seconds.")
 
             if epoch % 10 == 0 or epoch == num_epochs - 1:
                 self.val("train")
@@ -185,7 +208,9 @@ class Inr2vecTrainer:
 
             self.save_ckpt()
 
+    @torch.no_grad()
     def val(self, split: str) -> None:
+        val_start_time = time.time()
         loader = self.train_loader if split == "train" else self.val_loader
 
         self.encoder.eval()
@@ -194,37 +219,27 @@ class Inr2vecTrainer:
         cdts = []
         fscores = []
         idx = 0
+
         for batch in progress_bar(loader, desc=f"Validating on {split} set"):
-            pcds, matrices = batch
-            pcds = pcds.cuda()
+            vgrids, centroids, matrices = batch
+            vgrids = vgrids.cuda()
+            centroids = centroids.cuda()
             matrices = matrices.cuda()
+            bs = vgrids.shape[0]
 
-            bs = pcds.shape[0]
-
-            with torch.no_grad():
-                embeddings = self.encoder(matrices)
-
-            pred_pcds = []
+            embeddings = self.encoder(matrices)
 
             for i in range(bs):
+                pcd_gt = centroids[i][vgrids[i] == 1]
+
+                centr = centroids[i].unsqueeze(0)
+                centr = rearrange(centr, "b r1 r2 r3 d -> b (r1 r2 r3) d")
                 emb = embeddings[i].unsqueeze(0)
+                vgrid_pred = torch.sigmoid(self.decoder(emb, centr).squeeze(0))
+                pcd_pred = centr[0][vgrid_pred > 0.4]
 
-                def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
-                    pred = torch.sigmoid(self.decoder(emb, coords))
-                    pred = 1 - pred
-                    pred *= 0.1
-                    return pred
-
-                pred_pcd = sample_pcds_from_udfs(udfs_func, 1, 4096, (-1, 1), 0.05, 0.02, 2048, 1)
-                pred_pcds.append(pred_pcd[0])
-
-            pred_pcds = torch.stack(pred_pcds, dim=0)
-
-            cd = chamfer_t(pred_pcds, pcds)
-            cdts.extend([float(cd[i]) for i in range(bs)])
-
-            f = f_score(pred_pcds, pcds, threshold=0.01)[0]
-            fscores.extend([float(f[i]) for i in range(bs)])
+                cdts.append(float(chamfer_t(pcd_pred, pcd_gt)))
+                fscores.append(float(f_score(pcd_pred, pcd_gt, threshold=0.01)[0]))
 
             if idx > 99:
                 break
@@ -239,8 +254,13 @@ class Inr2vecTrainer:
         if split == "val" and mean_cdt < self.best_chamfer:
             self.best_chamfer = mean_cdt
             self.save_ckpt(best=True)
+            
+        val_end_time = time.time()
+        print(f"Validation on {split} set took {val_end_time - val_start_time:.4f} seconds.")
 
+    @torch.no_grad()
     def plot(self, split: str) -> None:
+        plot_start_time = time.time()
         loader = self.train_loader if split == "train" else self.val_loader_shuffled
 
         self.encoder.eval()
@@ -249,34 +269,32 @@ class Inr2vecTrainer:
         loader_iter = iter(loader)
         batch = next(loader_iter)
 
-        pcds, matrices = batch
-        pcds = pcds.cuda()
+        vgrids, centroids, matrices = batch
+        vgrids = vgrids.cuda()
+        centroids = centroids.cuda()
         matrices = matrices.cuda()
+        bs = vgrids.shape[0]
 
-        bs = pcds.shape[0]
-
-        with torch.no_grad():
-            embeddings = self.encoder(matrices)
-
-        pred_pcds = []
+        embeddings = self.encoder(matrices)
 
         for i in range(bs):
+            pcd_gt = centroids[i][vgrids[i] == 1]
+
+            centr = centroids[i].unsqueeze(0)
+            centr = rearrange(centr, "b r1 r2 r3 d -> b (r1 r2 r3) d")
             emb = embeddings[i].unsqueeze(0)
+            vgrid_pred = torch.sigmoid(self.decoder(emb, centr).squeeze(0))
+            pcd_pred = centr[0][vgrid_pred > 0.4]
+            pcd_pred = random_point_sampling(pcd_pred, 2048)
 
-            def udfs_func(coords: Tensor, indices: List[int]) -> Tensor:
-                pred = torch.sigmoid(self.decoder(emb, coords))
-                pred = 1 - pred
-                pred *= 0.1
-                return pred
+            gt_wo3d = wandb.Object3D(pcd_gt.cpu().detach().numpy())
+            pred_wo3d = wandb.Object3D(pcd_pred.cpu().detach().numpy())
 
-            pred_pcd = sample_pcds_from_udfs(udfs_func, 1, 4096, (-1, 1), 0.05, 0.02, 2048, 1)
-            pred_pcds.append(pred_pcd[0])
-
-        for i in range(bs):
-            gt_wo3d = wandb.Object3D(pcds[i].cpu().detach().numpy())
-            pred_wo3d = wandb.Object3D(pred_pcds[i].cpu().detach().numpy())
-            pcd_logs = {f"{split}/pcd_{i}": [gt_wo3d, pred_wo3d]}
-            self.logfn(pcd_logs)
+            voxel_logs = {f"{split}/voxel_{i}": [gt_wo3d, pred_wo3d]}
+            self.logfn(voxel_logs)
+            
+        plot_end_time = time.time()
+        print(f"Plotting for {split} set took {plot_end_time - plot_start_time:.4f} seconds.")
 
     def save_ckpt(self, best: bool = False, all: bool = False) -> None:
         ckpt = {

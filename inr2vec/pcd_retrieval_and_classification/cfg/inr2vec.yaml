@@ -1,5 +1,5 @@
-inrs_root: /path/to/inrs
-
+#inrs_root: /path/to/inrs
+inrs_root: /media/data4TB/shapenet_h512l4_aug
 num_queries_on_surface: 10_000
 stds: [0.003, 0.01, 0.1]
 num_points_per_std: [5_000, 4_000, 500, 500]
@@ -28,3 +28,6 @@ val_bs: 16
 lr: 1e-4
 wd: 1e-2
 num_epochs: 300
+
+num_reconstruction_points: 2048
+reconstruction_ref_step: 1  

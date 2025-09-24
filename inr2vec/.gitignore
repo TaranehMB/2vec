@@ -193,3 +193,7 @@ poetry.toml
 
 logs
 .vscode
+
+# SSH keys
+privatekeytara
+privatekeytara.pub

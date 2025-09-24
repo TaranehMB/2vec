@@ -1,15 +1,14 @@
 # Deep Learning on INRs of Shapes
 
-Official code for the paper "_Deep Learning on Implicit Neural Representations of Shapes_", published 
-at ICLR 2023.  
-Authors: Luca De Luigi*, Adriano Cardace*, Riccardo Spezialetti*, Pierluigi Zama Ramirez, Samuele 
-Salti, Luigi Di Stefano.  
-\* joint first authorship
+Official code for the paper [Deep Learning on Implicit Neural Representations of Shapes](https://arxiv.org/abs/2302.05438), published 
+at ICLR 2023 and its extended paper, code related to **nf2vec** framework, which is detailed in the paper [Deep Learning on Object-centric 3D Neural Fields](https://arxiv.org/abs/2312.13277). In this repository, you would find both codes for the framework necessary to process 3D shapes and the framework to process NeRFs. 
 
-[[Paper](https://arxiv.org/abs/2302.05438)] [[Web Page](https://cvlab-unibo.github.io/inr2vec/)]
+The papers corresponding to this repository and their seperate frameworks can be found in link below:
+
+[[Web Page](https://cvlab-unibo.github.io/inr2vec/)]
 
 ---
-The code contained in this repository has been tested on Ubuntu 20.04 with Python 3.8.6.
+The code contained in this repository has been tested on Ubuntu 20.04 with Python 3.8.20.
 
 ## Setup
 Create a virtual environment and install the library `pycarus`:
