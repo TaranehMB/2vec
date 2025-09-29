@@ -133,23 +133,23 @@ The name of the files contained in these folders should not be changed. Within t
 
 Execute the following command to train *nf2vec*:
 ```
-python nerf2vec/train_nerf2vec.py
+$ python nerf2vec/train_nerf2vec.py
 ```
 If you have enabled *wandb*, then you should update its settings located in the *config_wandb* method, which is localed in the *train_nerf2vec.py* module.
 
 ## Export *nerf2vec* embeddings
 Execute the following command to export the *nerf2vec*'s embeddings:
 ```
-python nerf2vec/export_embeddings.py
+$ python nerf2vec/export_embeddings.py
 ```
 Note that these embeddings are **necessary** for other tasks, such as classification, retrieval and generation.
 
 ## Retrieval task
 Execute the following command to perform the retrieval task:
 ```
-python nerf_retrieval_and_interp/retrieval.py
+$ python nerf_retrieval_and_interp/retrieval.py
 ```
-The results will be shown in the *task_interp_and_retrieval/retrieval_plots_X* folder, where X depends on the chosen split (i.e., train, validation or test). The split can be set in the *main* method of the *retrieval.py* module.
+The results will be shown in the *nerf_retrieval_and_interp/retrieval_plots_X* folder, where X depends on the chosen split (i.e., train, validation or test). The split can be set in the *main* method of the *retrieval.py* module.
 
 Each file created during a specific retrieval iteration will be named using the same prefix represented by a randomly generated UUID.
 
@@ -157,37 +157,37 @@ Each file created during a specific retrieval iteration will be named using the 
 ## Interpolation task
 Execute the following command to perform the interpolation task:
 ```
-python nerf_retrieval_and_interp/interp.py
+$ python nerf_retrieval_and_interp/interp.py
 ```
-The results will be shown in the *task_interp_and_retrieval/interp_plots_X* folder, where X depends on the chosen split (i.e., train, validation or test). The split can be set in the *main* method of the *retrieval.py* module.
+The results will be shown in the *nerf_retrieval_and_interp/interp_plots_X* folder, where X depends on the chosen split (i.e., train, validation or test). The split can be set in the *main* method of the *retrieval.py* module.
 
 ## Classification task
 Execute the following command to perform the classification task:
 ```
-python nerf_class_and_generation/train_classifier.py
+$ python nerf_class_and_generation/train_classifier.py
 ```
-If you have enabled *wandb*, then you should update its settings located in the *config_wandb* method, which is localed in the *train_classifier.py* module.
+If you have enabled *wandb*, then you should update its settings located in the *config_wandb* method, which is located in the *train_classifier.py* module.
 
 ## Generation task
 In order to generate and visualize the new embeddings, it is necessary to execute some operations following a specific order.
 
 ### 1) Export embeddings
-The following command creates the folder *task_generation/latent_embeddings*, which will contain the *nerf2vec*'s embedding properly organized for this task.
+The following command creates the folder *nerf_class_and_generation/latent_embeddings*, which will contain the *nerf2vec*'s embedding properly organized for this task.
 ```
-python nerf_class_and_generation/export_embeddings.py
+$ python nerf_class_and_generation/export_embeddings.py
 ```
 
 ### 2) Train GANs
-The following command creates the folder *task_generation/experiments*, which will contain both the weights of the trained models and the generated embeddings:
+The following command creates the folder *nerf_class_and_generation/experiments*, which will contain both the weights of the trained models and the generated embeddings:
 ```
-python nerf_class_and_generation/train_latent_gan.py
+$ python nerf_class_and_generation/train_latent_gan.py
 ```
 All the hyperparameters used to train the *Latent GANs* can be found inside the *train_latent_gan.py* module.
 
 ### 3) Create renderings
 The following command creates renderings from the embeddings generated during the previous step:
 ```
-python nerf_class_and_generation/viz_nerf.py 
+$ python nerf_class_and_generation/viz_nerf.py 
 ```
 The renderings will be created in the *GAN_plots_X* folder, where X is the ID of a specific class.
 
@@ -210,7 +210,7 @@ If you find *inr2vec* work useful, please cite us:
 }
 ```
 If you find *nf2vec* work useful, please cite us:
-
+```
 @article{zama2023deep,
   title={Deep Learning on Object-centric 3D Neural Fields},
   author={Zama Ramirez, Pierluigi and De Luigi, Luca and Sirocchi, Daniele and Cardace, Adriano and Spezialetti, Riccardo and Ballerini, Francesco and Salti, Samuele and Di Stefano, Luigi},
@@ -218,7 +218,7 @@ If you find *nf2vec* work useful, please cite us:
   pages={arXiv--2312},
   year={2023}
 }
-
+```
 # Datasets and model weights
 Please contact us if you need access to the datasets, exported embeddings, and weights of the trained models used in all experiments.
 
