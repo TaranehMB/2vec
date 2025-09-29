@@ -10,7 +10,7 @@ from typing import Any, Dict
 from torch import Tensor
 
 from nerf2vec import config as nerf2vec_config
-from nerf.utils import Rays
+from models.nerf.utils import Rays
 
 import torch.nn.functional as F
 
